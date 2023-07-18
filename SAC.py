@@ -118,7 +118,7 @@ class ValueNetwork(nn.Module):
 
 class ActorNetwork(nn.Module):
     def __init__(self, alpha, input_dims, max_action, fc1_dims=256, 
-            fc2_dims=256, n_actions=2, name='actor', chkpt_dir='results'):
+            fc2_dims=256, n_actions=4, name='actor', chkpt_dir='results'):
         super(ActorNetwork, self).__init__()
         self.input_dims = input_dims
         self.fc1_dims = fc1_dims
@@ -161,8 +161,7 @@ class ActorNetwork(nn.Module):
             actions = probabilities.rsample()
         else:
             actions = probabilities.sample()
-
-        action = T.tanh(actions)*T.tensor(self.max_action).to(self.device)
+        action = T.tanh(actions)*T.tensor(self.max_action[:4]).to(self.device)
         log_probs = probabilities.log_prob(actions)
         log_probs -= T.log(1-action.pow(2)+self.reparam_noise)
         log_probs = log_probs.sum(1, keepdim=True)
@@ -178,7 +177,7 @@ class ActorNetwork(nn.Module):
 # Agent
 class Agent():
     def __init__(self, alpha=0.0003, beta=0.0003, input_dims=[8],
-            env=None, gamma=0.99, n_actions=8, max_size=1000000, tau=0.005,
+            env=None, gamma=0.99, n_actions=4, max_size=1000000, tau=0.005,
             layer1_size=256, layer2_size=256, batch_size=256, reward_scale=2):
         self.gamma = gamma
         self.tau = tau
@@ -198,7 +197,7 @@ class Agent():
         self.scale = reward_scale
         self.update_network_parameters(tau=1)
 
-    def choose_action(self, observation):
+    def act(self, observation):
         state = T.Tensor([observation]).to(self.actor.device)
         actions, _ = self.actor.sample_normal(state, reparameterize=False)
 
