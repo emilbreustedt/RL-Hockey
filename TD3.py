@@ -98,9 +98,11 @@ class TD3Agent(object):
             "hidden_sizes_critic": [128,128,64],
             "update_target_every": 100,
             "update_policy_every": 100,
-            "use_target_net": True,
-            "smoothing_std": 0.001,
-            "smoothing_clip": 0.0005
+            "use_target_net" : True,
+            "cdq": True,
+            "smoothing_std": 0.0005,
+            "smoothing_clip": 0.00025,
+            "theta" : 0.01
         }
         self._config.update(userconfig)
         self._eps = self._config['eps']
@@ -166,11 +168,42 @@ class TD3Agent(object):
         self.policy_target1.load_state_dict(self.policy1.state_dict())
         self.policy_target2.load_state_dict(self.policy2.state_dict())
 
+    def sliding_update(self):
+        theta = self._config["theta"]
+        #print("q1 ",next(self.Q1.parameters())[0,0])
+        #print("qt1 before ", next(self.Q_target1.parameters())[0,0])
+        # sliding critic target update
+        Q2_net = self.Q2.parameters()
+        Q_target1 = self.Q_target1.parameters()
+        Q_target2 = self.Q_target2.parameters()
+        for q1 in self.Q1.parameters():
+            q2 = next(Q2_net)
+            qt1 = next(Q_target1)
+            qt2 = next(Q_target2)
+            with torch.no_grad():
+                qt1.copy_((1-theta)*qt1 + theta*q1)
+                qt2.copy_((1-theta)*qt2 + theta*q2)
+        
+        #print("qt1 after ", next(self.Q_target1.parameters())[0,0])
+        # sliding actor target update
+        P2_net = self.policy2.parameters()
+        P_target1 = self.policy_target1.parameters()
+        P_target2 = self.policy_target2.parameters()
+        for p1 in self.policy1.parameters():
+            p2 = next(P2_net)
+            pt1 = next(P_target1)
+            pt2 = next(P_target2)
+            with torch.no_grad():
+                pt1.copy_((1-theta)*pt1 + theta*p1)
+                pt2.copy_((1-theta)*pt2 + theta*p2)
+        
+
     def act(self, observation, eps=None):
         if eps is None:
             eps = self._eps
         #
         action = self.policy1.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        #action = self.policy1.predict(observation) + eps*torch.normal(0,0.01,self.action_space.size)
         action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
         return action
 
@@ -198,7 +231,9 @@ class TD3Agent(object):
     def train(self, iter_fit=32):
         to_torch = lambda x: torch.from_numpy(x.astype(np.float32))
         losses = []
+        cdq = self._config["cdq"]
         self.train_iter+=1
+        grads = 0
         if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
             self._copy_nets()
         for i in range(iter_fit):
@@ -215,7 +250,7 @@ class TD3Agent(object):
             # 
             action1 = self.policy_smoothing(self.policy_target1.forward(s_prime))
             action2 = self.policy_smoothing(self.policy_target2.forward(s_prime))
-            if self._config["use_target_net"]:
+            if cdq:
                 q_prime1 = torch.min(torch.cat((
                     self.Q_target1.Q_value(s_prime, action1),
                     self.Q_target2.Q_value(s_prime, action1)),dim=1),dim=1, keepdim=True)[0]
@@ -224,35 +259,47 @@ class TD3Agent(object):
                     self.Q_target2.Q_value(s_prime, action2)),dim=1),dim=1, keepdim=True)[0]
                 
             else:
-                q_prime1 = torch.min(torch.vstack((self.Q1.Q_value(s_prime, action1), 
-                                             self.Q2.Q_value(s_prime, action1))),dim=0)
-                q_prime2 = torch.min(torch.vstack((self.Q1.Q_value(s_prime, action2), 
-                                             self.Q2.Q_value(s_prime, action2))),dim=0)
+                q_prime1 = self.Q1.Q_value(s_prime, action1)
+                q_prime2 = self.Q1.Q_value(s_prime, action2)
+                
             # target
             gamma=self._config['discount']
             td_target1 = rew + gamma * (1.0-done) * q_prime1
-            td_target2 = rew + gamma * (1.0-done) * q_prime2
+            if cdq:
+                td_target2 = rew + gamma * (1.0-done) * q_prime2
 
             # optimize the Q objective
             fit_loss1 = self.Q1.fit(s, a, td_target1)
-            fit_loss2 = self.Q2.fit(s, a, td_target2)
+            if cdq:
+                fit_loss2 = self.Q2.fit(s, a, td_target2)
 
             # optimize actor objective delayed
-            if self.train_iter % self._config["update_policy_every"] == 0:
+            if i % self._config["update_policy_every"] == 0:
+                self.sliding_update()
+                
                 self.optimizer1.zero_grad()
                 self.optimizer2.zero_grad()
                 q1 = self.Q1.Q_value(s, self.policy1.forward(s))
-                q2 = self.Q2.Q_value(s, self.policy2.forward(s))
                 actor_loss1 = -torch.mean(q1)
-                actor_loss2 = -torch.mean(q2)
                 actor_loss1.backward()
-                actor_loss2.backward()
+                actor_loss2 = None
+                if cdq:
+                    q2 = self.Q2.Q_value(s, self.policy2.forward(s))
+                    actor_loss2 = -torch.mean(q2)
+                    actor_loss2.backward()
+                    self.optimizer2.step()
+                #for k in self.policy1.parameters():
+                    #print('===========\ngradient:\n----------\nmin:{}  max{}'.format(torch.min(k.grad),torch.max(k.grad)))
+                    #grads += torch.sum(torch.abs(k.grad))
                 self.optimizer1.step()
-                self.optimizer2.step()
                 losses.append((fit_loss1, fit_loss2, actor_loss2.item(), actor_loss2.item()))
             else:
                 losses.append((fit_loss1, fit_loss2, None, None))
-
+                
+            
+        #if self.train_iter % self._config["update_policy_every"] == 0:
+            #print(grads)
+        
         return losses
 
 
