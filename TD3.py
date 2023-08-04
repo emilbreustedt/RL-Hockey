@@ -249,8 +249,8 @@ class TD3Agent(object):
 
             # 
             action1 = self.policy_smoothing(self.policy_target1.forward(s_prime))
-            action2 = self.policy_smoothing(self.policy_target2.forward(s_prime))
             if cdq:
+                action2 = self.policy_smoothing(self.policy_target2.forward(s_prime))
                 q_prime1 = torch.min(torch.cat((
                     self.Q_target1.Q_value(s_prime, action1),
                     self.Q_target2.Q_value(s_prime, action1)),dim=1),dim=1, keepdim=True)[0]
@@ -259,42 +259,40 @@ class TD3Agent(object):
                     self.Q_target2.Q_value(s_prime, action2)),dim=1),dim=1, keepdim=True)[0]
                 
             else:
-                q_prime1 = self.Q1.Q_value(s_prime, action1)
-                q_prime2 = self.Q1.Q_value(s_prime, action2)
+                q_prime1 = self.Q_target1.Q_value(s_prime, action1)
                 
-            # target
             gamma=self._config['discount']
+            
             td_target1 = rew + gamma * (1.0-done) * q_prime1
+            fit_loss1 = self.Q1.fit(s, a, td_target1)
+            fit_loss2 = 0
             if cdq:
                 td_target2 = rew + gamma * (1.0-done) * q_prime2
-
-            # optimize the Q objective
-            fit_loss1 = self.Q1.fit(s, a, td_target1)
-            if cdq:
                 fit_loss2 = self.Q2.fit(s, a, td_target2)
 
             # optimize actor objective delayed
             if i % self._config["update_policy_every"] == 0:
-                self.sliding_update()
+                #self.sliding_update()
                 
                 self.optimizer1.zero_grad()
                 self.optimizer2.zero_grad()
                 q1 = self.Q1.Q_value(s, self.policy1.forward(s))
                 actor_loss1 = -torch.mean(q1)
                 actor_loss1.backward()
-                actor_loss2 = None
+                actor_loss2 = 0
                 if cdq:
                     q2 = self.Q2.Q_value(s, self.policy2.forward(s))
                     actor_loss2 = -torch.mean(q2)
                     actor_loss2.backward()
                     self.optimizer2.step()
+                    actor_loss2 = actor_loss2.item()
                 #for k in self.policy1.parameters():
                     #print('===========\ngradient:\n----------\nmin:{}  max{}'.format(torch.min(k.grad),torch.max(k.grad)))
                     #grads += torch.sum(torch.abs(k.grad))
                 self.optimizer1.step()
-                losses.append((fit_loss1, fit_loss2, actor_loss2.item(), actor_loss2.item()))
+                losses.append((fit_loss1, actor_loss1.item(), fit_loss2, actor_loss2))
             else:
-                losses.append((fit_loss1, fit_loss2, None, None))
+                losses.append((fit_loss1, None, fit_loss2, None))
                 
             
         #if self.train_iter % self._config["update_policy_every"] == 0:
