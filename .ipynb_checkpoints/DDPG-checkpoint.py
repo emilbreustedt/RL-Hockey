@@ -15,6 +15,9 @@ torch.set_num_threads(1)
 
 class UnsupportedSpace(Exception):
     """Exception raised when the Sensor or Action space are not compatible
+
+    Attributes:
+        message -- explanation of the error
     """
     def __init__(self, message="Unsupported Space"):
         self.message = message
@@ -23,9 +26,8 @@ class UnsupportedSpace(Exception):
 class QFunction(Feedforward):
     def __init__(self, observation_dim, action_dim, hidden_sizes=[100,100],
                  learning_rate = 0.0002):
-        # TODO: Setup network with right input and output size (using super().__init__)
-        super().__init__(self, input_size=observation_dim, hidden_sizes = hidden_sizes, output_size=action_dim)
-        # END
+        super().__init__(input_size=observation_dim + action_dim, hidden_sizes=hidden_sizes,
+                         output_size=1)
         self.optimizer=torch.optim.Adam(self.parameters(),
                                         lr=learning_rate,
                                         eps=0.000001)
@@ -46,10 +48,8 @@ class QFunction(Feedforward):
         return loss.item()
 
     def Q_value(self, observations, actions):
-        # TODO: implement the forward pass.
-        pred = self.forward(observations, actions)
+        return self.forward(torch.hstack([observations,actions]))
 
-# Ornstein Uhlbeck noise, Nothing to be done here
 class OUNoise():
     def __init__(self, shape, theta: float = 0.15, dt: float = 1e-2):
         self._shape = shape
@@ -97,7 +97,8 @@ class DDPGAgent(object):
             "hidden_sizes_actor": [128,128],
             "hidden_sizes_critic": [128,128,64],
             "update_target_every": 100,
-            "use_target_net": True
+            "use_target_net": True,
+            "theta" : 0.005
         }
         self._config.update(userconfig)
         self._eps = self._config['eps']
@@ -117,24 +118,16 @@ class DDPGAgent(object):
                                   hidden_sizes= self._config["hidden_sizes_critic"],
                                   learning_rate = 0)
 
-        high, low = torch.from_numpy(self._action_space.high), torch.from_numpy(self._action_space.low)
-        # TODO:
-        # The activation function of the policy should limit the output the action space
-        # and makes sure the derivative goes to zero at the boundaries
-        # Use Tanh, which is between -1 and 1 and scale it to [low, high]
-        # Hint: use torch.nn.Tanh()(x)
-        output_activation = lambda x: low + (1+torch.nn.Tanh()(x))/2*(high-low)
-
         self.policy = Feedforward(input_size=self._obs_dim,
                                   hidden_sizes= self._config["hidden_sizes_actor"],
                                   output_size=self._action_n,
                                   activation_fun = torch.nn.ReLU(),
-                                  output_activation = output_activation)
+                                  output_activation = torch.nn.Tanh())
         self.policy_target = Feedforward(input_size=self._obs_dim,
                                          hidden_sizes= self._config["hidden_sizes_actor"],
                                          output_size=self._action_n,
                                          activation_fun = torch.nn.ReLU(),
-                                         output_activation = output_activation)
+                                         output_activation = torch.nn.Tanh())
 
         self._copy_nets()
 
@@ -148,8 +141,13 @@ class DDPGAgent(object):
         self.policy_target.load_state_dict(self.policy.state_dict())
 
     def act(self, observation, eps=None):
-        # TODO: implement this: use self.action_noise() (which provides normal noise with standard variance)
-
+        if eps is None:
+            eps = self._eps
+        #
+        #action = self.policy.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        action = self.policy.predict(observation) + np.random.normal(0.0,eps,self._action_n)
+        action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
+        return action
 
     def store_transition(self, transition):
         self.buffer.add_transition(transition)
@@ -164,15 +162,31 @@ class DDPGAgent(object):
 
     def reset(self):
         self.action_noise.reset()
-
+        
+    def sliding_update(self):
+        theta = self._config["theta"]
+        # sliding critic target update
+        Q_target1 = self.Q_target.parameters()
+        for q1 in self.Q.parameters():
+            qt1 = next(Q_target1)
+            with torch.no_grad():
+                qt1.copy_((1-theta)*qt1 + theta*q1)
+        
+        # sliding actor target update
+        P_target1 = self.policy_target.parameters()
+        for p1 in self.policy.parameters():
+            pt1 = next(P_target1)
+            with torch.no_grad():
+                pt1.copy_((1-theta)*pt1 + theta*p1)
+                
     def train(self, iter_fit=32):
         to_torch = lambda x: torch.from_numpy(x.astype(np.float32))
         losses = []
         self.train_iter+=1
-        if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
-            self._copy_nets()
-
+        #if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
+        #    self._copy_nets()
         for i in range(iter_fit):
+
             # sample from the replay buffer
             data=self.buffer.sample(batch=self._config['batch_size'])
             s = to_torch(np.stack(data[:,0])) # s_t
@@ -180,13 +194,28 @@ class DDPGAgent(object):
             rew = to_torch(np.stack(data[:,2])[:,None]) # rew  (batchsize,1)
             s_prime = to_torch(np.stack(data[:,3])) # s_t+1
             done = to_torch(np.stack(data[:,4])[:,None]) # done signal  (batchsize,1)
-            # TODO: Implement the rest of the algorithm
 
-            # assign q_loss_value  and actor_loss to we stored in the statistics
+            if self._config["use_target_net"]:
+                q_prime = self.Q_target.Q_value(s_prime, self.policy_target.forward(s_prime))
+            else:
+                q_prime = self.Q.Q_value(s_prime, self.policy.forward(s_prime))
+            # target
+            gamma=self._config['discount']
+            td_target = rew + gamma * (1.0-done) * q_prime
 
+            # optimize the Q objective
+            fit_loss = self.Q.fit(s, a, td_target)
 
-            losses.append((q_loss_value , actor_loss.item()))
-
+            # optimize actor objective
+            self.optimizer.zero_grad()
+            q = self.Q.Q_value(s, self.policy.forward(s))
+            actor_loss = -torch.mean(q)
+            actor_loss.backward()
+            self.optimizer.step()
+            losses.append((fit_loss, actor_loss.item()))
+            if self.train_iter % self._config["update_policy_every"] == 0:
+                self.sliding_update()
+                
         return losses
 
 

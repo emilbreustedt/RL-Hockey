@@ -102,7 +102,7 @@ class TD3Agent(object):
             "cdq": True,
             "smoothing_std": 0.0005,
             "smoothing_clip": 0.00025,
-            "theta" : 0.01
+            "theta" : 0.005
         }
         self._config.update(userconfig)
         self._eps = self._config['eps']
@@ -197,13 +197,24 @@ class TD3Agent(object):
                 pt1.copy_((1-theta)*pt1 + theta*p1)
                 pt2.copy_((1-theta)*pt2 + theta*p2)
         
-
+    def remote_act(self, obs : np.ndarray,) -> np.ndarray:
+        eps = self._eps
+        """
+        Expects an observation as input, returns an action
+        """
+        #action = self.policy1.predict(obs) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        #print(self.policy1.predict(observation).shape, np.random.normal(0.0,eps,self._action_n,1).shape)
+        action = self.policy1.predict(observation) + np.random.normal(0.0,eps,self._action_n)
+        action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
+        return action
+    
     def act(self, observation, eps=None):
         if eps is None:
             eps = self._eps
         #
-        action = self.policy1.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
-        #action = self.policy1.predict(observation) + eps*torch.normal(0,0.01,self.action_space.size)
+        #action = self.policy1.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        #print(self.policy1.predict(observation).shape, np.random.normal(0.0,eps,self._action_n,1).shape)
+        action = self.policy1.predict(observation) + np.random.normal(0.0,eps,self._action_n)
         action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
         return action
 
@@ -234,8 +245,8 @@ class TD3Agent(object):
         cdq = self._config["cdq"]
         self.train_iter+=1
         grads = 0
-        if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
-            self._copy_nets()
+        #if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
+        #    self._copy_nets()
         for i in range(iter_fit):
 
             # sample from the replay buffer
@@ -271,14 +282,15 @@ class TD3Agent(object):
                 fit_loss2 = self.Q2.fit(s, a, td_target2)
 
             # optimize actor objective delayed
-            if i % self._config["update_policy_every"] == 0:
-                #self.sliding_update()
+            if self.train_iter % self._config["update_policy_every"] == 0:
+                self.sliding_update()
                 
                 self.optimizer1.zero_grad()
                 self.optimizer2.zero_grad()
                 q1 = self.Q1.Q_value(s, self.policy1.forward(s))
                 actor_loss1 = -torch.mean(q1)
                 actor_loss1.backward()
+                self.optimizer1.step()
                 actor_loss2 = 0
                 if cdq:
                     q2 = self.Q2.Q_value(s, self.policy2.forward(s))
@@ -289,7 +301,7 @@ class TD3Agent(object):
                 #for k in self.policy1.parameters():
                     #print('===========\ngradient:\n----------\nmin:{}  max{}'.format(torch.min(k.grad),torch.max(k.grad)))
                     #grads += torch.sum(torch.abs(k.grad))
-                self.optimizer1.step()
+                #print(actor_loss1)
                 losses.append((fit_loss1, actor_loss1.item(), fit_loss2, actor_loss2))
             else:
                 losses.append((fit_loss1, None, fit_loss2, None))

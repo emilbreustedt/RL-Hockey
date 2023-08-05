@@ -45,11 +45,15 @@ def train_gym(agent1, config):
     if config["agent_type"] == "DDPG":
         train_losses = np.empty((0,2))
     rewards = []
+    start_train = 0
     if config["env_type"] == "walker":
         env = gym.make("BipedalWalker-v3", hardcore=False)
     if config["env_type"] == "pendulum":
         env = gym.make("Pendulum-v1")
-    #eps = 1 # entirely random actions for initial 
+        start_train = 0
+    if config["env_type"] == "cheetah":
+        env = gym.make("HalfCheetah-v4")
+    eps = 1.0 # entirely random actions for initial 
     desc = "Training..."
     eps = config["eps"]
     if config["test"]:
@@ -72,19 +76,16 @@ def train_gym(agent1, config):
                    for k in range(5):
                        player1.store_transition((obs, a1, r, obsnew, d))
             obs=obsnew
-            ep_r +=r
+            ep_r += r
             #rewards.append(r)
             if steps>1000:
                 break
-        if not config["test"]:
-            eps = config["eps"]
-            loss = player1.train(config["iter_fit"])
-            train_losses = np.concatenate((train_losses, np.asarray(loss)))
+            if not config["test"] and i>start_train:
+                eps = config["eps"]
+                loss = player1.train(config["iter_fit"])
+                train_losses = np.concatenate((train_losses, np.asarray(loss)))
             #if config["mode"]=="selfplay":
-                #_ = player2.train(config["iter_fit"])
-        '''if (i+1)%500==0:
-            config["learning_rate_critic"] = config["learning_rate_critic"]*0.5
-            config["learning_rate_actor"] = config["learning_rate_actor"]*0.5'''
+                #_ = player2.train(config["iter_fit"])'
         rewards.append(ep_r)
     env.close()
     save_statistics(config["agent_type"], config, rewards, train_losses, wins=None, losses=None, winrate=None)
@@ -123,7 +124,7 @@ def train_hockey(agent_type, agent1, agent2, config):
         train_losses = np.empty((0,2))
     rewards = []
     wins, losses, rewards = 0, 0, []
-    eps = 1 # entirely random actions for initial 
+    eps = 1.0 # entirely random actions for initial 
     desc = "Training..."
     if config["test"]:
         desc="Testing..."
@@ -133,7 +134,11 @@ def train_hockey(agent_type, agent1, agent2, config):
         d = False
         ep_r = 0
         old_r = 0
+        steps = 0
         while not d:
+            steps +=1
+            #if steps>100:
+            #    break
             if config["render"]:
                 env.render()
             a1 = player1.act(obs, eps=eps)
@@ -156,15 +161,12 @@ def train_hockey(agent_type, agent1, agent2, config):
             ep_r +=r
             #print(r)
             old_r = r
-        if not config["test"] and i>100:
-            eps = config["eps"]
-            loss = player1.train(config["iter_fit"])
-            train_losses = np.concatenate((train_losses, np.asarray(loss)))
+            if not config["test"] and i>50:
+                eps = config["eps"]
+                loss = player1.train(config["iter_fit"])
+                train_losses = np.concatenate((train_losses, np.asarray(loss)))
             #if config["mode"]=="selfplay":
                 #_ = player2.train(config["iter_fit"])
-        '''if (i+1)%500==0:
-            config["learning_rate_critic"] = config["learning_rate_critic"]*0.5
-            config["learning_rate_actor"] = config["learning_rate_actor"]*0.5'''
         rewards.append(ep_r)
     print(f'Wins: {wins}')
     print(f'Losses: {losses}')
@@ -189,7 +191,7 @@ def init_train(config):
         if config["env_type"] == "pendulum":
             env = gym.make("Pendulum-v1")
         if config["env_type"] == "cheetah":
-            env = gym.make("HalfCheetah_v4")
+            env = gym.make("HalfCheetah-v4")
     # turn off the respective parts of TD3 to analyze separately
     if agent_type == "CDQ":
         config["smoothing_clip"] = 0
@@ -200,27 +202,31 @@ def init_train(config):
     if agent_type == "DPU":
         config["cdq"] = False
         config["smoothing_clip"] = 0
-
+    if agent_type == "TD3_PRIO":
+        config["prio_replay"] = True
+    #config["theta"] = 0.02*(1/config["iter_fit"])*config["update_policy_every"]
+    
     if agent_type =="DDPG":
         agent1 = DDPG.DDPGAgent(env.observation_space, env.action_space, discount=config["discount"], buffer_size=config["buffer_size"], eps=config["eps"],
                               update_target_every=config["update_target_every"], update_policy_every=config["update_policy_every"], 
                               hidden_sizes_actor=config["hidden_sizes_actor"],hidden_sizes_critic=config["hidden_sizes_critic"],
-                              smoothing_std=config["smoothing_std"], smoothing_clip=config["smoothing_clip"],
+                              smoothing_std=config["smoothing_std"], smoothing_clip=config["smoothing_clip"], batch_size=config["batch_size"],
                               learning_rate_actor=config["learning_rate_actor"], learning_rate_critic=config["learning_rate_critic"])
     else:
         agent1 = TD3.TD3Agent(env.observation_space, env.action_space, discount=config["discount"], buffer_size=config["buffer_size"], eps=config["eps"],
                               update_target_every=config["update_target_every"], update_policy_every=config["update_policy_every"], 
                               hidden_sizes_actor=config["hidden_sizes_actor"],hidden_sizes_critic=config["hidden_sizes_critic"],
-                              smoothing_std=config["smoothing_std"], smoothing_clip=config["smoothing_clip"],
+                              smoothing_std=config["smoothing_std"], smoothing_clip=config["smoothing_clip"], batch_size=config["batch_size"],
                               learning_rate_actor=config["learning_rate_actor"], learning_rate_critic=config["learning_rate_critic"], 
                               theta=config["theta"], cdq=config["cdq"])
     agent2 = None
     if config["mode"] == "selfplay":
-        agent2 = TD3.TD3Agent(agent_type, env.observation_space, env.action_space, discount=config["discount"], buffer_size=config["buffer_size"], eps=config["eps"],
-                          update_target_every=config["update_target_every"], update_policy_every=config["update_policy_every"], 
-                          hidden_sizes_actor=config["hidden_sizes_actor"],hidden_sizes_critic=config["hidden_sizes_critic"],
-                          smoothing_std=config["smoothing_std"], smoothing_clip=config["smoothing_clip"],
-                          learning_rate_actor=config["learning_rate_actor"], learning_rate_critic=config["learning_rate_critic"])
+        agent2 = TD3.TD3Agent(env.observation_space, env.action_space, discount=config["discount"], buffer_size=config["buffer_size"], eps=config["eps"],
+                              update_target_every=config["update_target_every"], update_policy_every=config["update_policy_every"], 
+                              hidden_sizes_actor=config["hidden_sizes_actor"],hidden_sizes_critic=config["hidden_sizes_critic"],
+                              smoothing_std=config["smoothing_std"], smoothing_clip=config["smoothing_clip"], batch_size=config["batch_size"],
+                              learning_rate_actor=config["learning_rate_actor"], learning_rate_critic=config["learning_rate_critic"], 
+                              theta=config["theta"], cdq=config["cdq"])
     if config["checkpoint1"]:
         agent1.restore_state(torch.load(config["checkpoint1"]))
     if config["checkpoint2"]:
@@ -230,7 +236,7 @@ def init_train(config):
         losses_wea, rewards_wea = train_hockey(agent_type, agent1, agent2, config)
     else:
         losses_wea, rewards_wea = train_gym(agent1,config)
-    rewards_wea_avg = moving_average(rewards_wea, 100)
+    rewards_wea_avg = moving_average(rewards_wea, 20)
     if not config["test"]:
         plt.figure(figsize=(3,2))
         plt.plot(rewards_wea_avg)

@@ -97,7 +97,8 @@ class DDPGAgent(object):
             "hidden_sizes_actor": [128,128],
             "hidden_sizes_critic": [128,128,64],
             "update_target_every": 100,
-            "use_target_net": True
+            "use_target_net": True,
+            "theta" : 0.005
         }
         self._config.update(userconfig)
         self._eps = self._config['eps']
@@ -143,7 +144,8 @@ class DDPGAgent(object):
         if eps is None:
             eps = self._eps
         #
-        action = self.policy.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        #action = self.policy.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        action = self.policy.predict(observation) + np.random.normal(0.0,eps,self._action_n)
         action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
         return action
 
@@ -160,13 +162,29 @@ class DDPGAgent(object):
 
     def reset(self):
         self.action_noise.reset()
-
+        
+    def sliding_update(self):
+        theta = self._config["theta"]
+        # sliding critic target update
+        Q_target1 = self.Q_target.parameters()
+        for q1 in self.Q.parameters():
+            qt1 = next(Q_target1)
+            with torch.no_grad():
+                qt1.copy_((1-theta)*qt1 + theta*q1)
+        
+        # sliding actor target update
+        P_target1 = self.policy_target.parameters()
+        for p1 in self.policy.parameters():
+            pt1 = next(P_target1)
+            with torch.no_grad():
+                pt1.copy_((1-theta)*pt1 + theta*p1)
+                
     def train(self, iter_fit=32):
         to_torch = lambda x: torch.from_numpy(x.astype(np.float32))
         losses = []
         self.train_iter+=1
-        if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
-            self._copy_nets()
+        #if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
+        #    self._copy_nets()
         for i in range(iter_fit):
 
             # sample from the replay buffer
@@ -194,9 +212,10 @@ class DDPGAgent(object):
             actor_loss = -torch.mean(q)
             actor_loss.backward()
             self.optimizer.step()
-
             losses.append((fit_loss, actor_loss.item()))
-
+            if self.train_iter % self._config["update_policy_every"] == 0:
+                self.sliding_update()
+                
         return losses
 
 
