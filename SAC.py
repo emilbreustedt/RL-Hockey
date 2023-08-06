@@ -44,7 +44,7 @@ class Memory():
 
 # Networks
 class CriticNetwork(nn.Module):
-    def __init__(self, beta, input_dims, n_actions, fc1_dims=256, fc2_dims=256,
+    def __init__(self, alpha, input_dims, n_actions, fc1_dims=256, fc2_dims=256,
             name='critic', chkpt_dir='results'):
         super(CriticNetwork, self).__init__()
         self.input_dims = input_dims
@@ -59,7 +59,7 @@ class CriticNetwork(nn.Module):
         self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
         self.q = nn.Linear(self.fc2_dims, 1)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=beta)
+        self.optimizer = optim.Adam(self.parameters(), lr=alpha)
         self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 
         self.to(self.device)
@@ -78,10 +78,13 @@ class CriticNetwork(nn.Module):
         T.save(self.state_dict(), self.checkpoint_file)
 
     def load_checkpoint(self):
-        self.load_state_dict(T.load(self.checkpoint_file))
+        if T.cuda.is_available():
+            self.load_state_dict(T.load(self.checkpoint_file))
+        else:
+            self.load_state_dict(T.load(self.checkpoint_file, map_location=T.device('cpu')))
 
 class ValueNetwork(nn.Module):
-    def __init__(self, beta, input_dims, fc1_dims=256, fc2_dims=256,
+    def __init__(self, alpha, input_dims, fc1_dims=256, fc2_dims=256,
             name='value', chkpt_dir='results'):
         super(ValueNetwork, self).__init__()
         self.input_dims = input_dims
@@ -95,7 +98,7 @@ class ValueNetwork(nn.Module):
         self.fc2 = nn.Linear(self.fc1_dims, fc2_dims)
         self.v = nn.Linear(self.fc2_dims, 1)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=beta)
+        self.optimizer = optim.Adam(self.parameters(), lr=alpha)
         self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 
         self.to(self.device)
@@ -114,10 +117,13 @@ class ValueNetwork(nn.Module):
         T.save(self.state_dict(), self.checkpoint_file)
 
     def load_checkpoint(self):
-        self.load_state_dict(T.load(self.checkpoint_file))
+        if T.cuda.is_available():
+            self.load_state_dict(T.load(self.checkpoint_file))
+        else:
+            self.load_state_dict(T.load(self.checkpoint_file, map_location=T.device('cpu')))
 
 class ActorNetwork(nn.Module):
-    def __init__(self, alpha, input_dims, max_action, fc1_dims=256, 
+    def __init__(self, alpha, input_dims, fc1_dims=256, 
             fc2_dims=256, n_actions=4, name='actor', chkpt_dir='results'):
         super(ActorNetwork, self).__init__()
         self.input_dims = input_dims
@@ -127,7 +133,6 @@ class ActorNetwork(nn.Module):
         self.name = name
         self.checkpoint_dir = chkpt_dir
         self.checkpoint_file = os.path.join(self.checkpoint_dir, name+'_sac')
-        self.max_action = max_action
         self.reparam_noise = 1e-6
 
         self.fc1 = nn.Linear(*self.input_dims, self.fc1_dims)
@@ -153,15 +158,13 @@ class ActorNetwork(nn.Module):
 
         return mu, sigma
 
-    def sample_normal(self, state, reparameterize=True):
+    def sample_normal(self, state):
         mu, sigma = self.forward(state)
         probabilities = Normal(mu, sigma)
 
-        if reparameterize:
-            actions = probabilities.rsample()
-        else:
-            actions = probabilities.sample()
-        action = T.tanh(actions)*T.tensor(self.max_action[:4]).to(self.device)
+        actions = probabilities.rsample()
+
+        action = T.tanh(actions).to(self.device)
         log_probs = probabilities.log_prob(actions)
         log_probs -= T.log(1-action.pow(2)+self.reparam_noise)
         log_probs = log_probs.sum(1, keepdim=True)
@@ -172,11 +175,14 @@ class ActorNetwork(nn.Module):
         T.save(self.state_dict(), self.checkpoint_file)
 
     def load_checkpoint(self):
-        self.load_state_dict(T.load(self.checkpoint_file))
+        if T.cuda.is_available():
+            self.load_state_dict(T.load(self.checkpoint_file))
+        else:
+            self.load_state_dict(T.load(self.checkpoint_file, map_location=T.device('cpu')))
 
 # Agent
 class Agent():
-    def __init__(self, alpha=0.0003, beta=0.0003, input_dims=[8],
+    def __init__(self, alpha=0.0003, input_dims=[8],
             env=None, gamma=0.99, n_actions=4, max_size=1000000, tau=0.005,
             layer1_size=256, layer2_size=256, batch_size=256, reward_scale=2):
         self.gamma = gamma
@@ -186,20 +192,20 @@ class Agent():
         self.n_actions = n_actions
 
         self.actor = ActorNetwork(alpha, input_dims, n_actions=n_actions,
-                    name='actor', max_action=env.action_space.high)
-        self.critic_1 = CriticNetwork(beta, input_dims, n_actions=n_actions,
+                    name='actor')
+        self.critic_1 = CriticNetwork(alpha, input_dims, n_actions=n_actions,
                     name='critic_1')
-        self.critic_2 = CriticNetwork(beta, input_dims, n_actions=n_actions,
+        self.critic_2 = CriticNetwork(alpha, input_dims, n_actions=n_actions,
                     name='critic_2')
-        self.value = ValueNetwork(beta, input_dims, name='value')
-        self.target_value = ValueNetwork(beta, input_dims, name='target_value')
+        self.value = ValueNetwork(alpha, input_dims, name='value')
+        self.target_value = ValueNetwork(alpha, input_dims, name='target_value')
 
         self.scale = reward_scale
         self.update_network_parameters(tau=1)
 
     def act(self, observation):
         state = T.Tensor([observation]).to(self.actor.device)
-        actions, _ = self.actor.sample_normal(state, reparameterize=False)
+        actions, _ = self.actor.sample_normal(state)
 
         return actions.cpu().detach().numpy()[0]
 
@@ -255,7 +261,7 @@ class Agent():
         value_ = self.target_value(state_).view(-1)
         value_[done] = 0.0
 
-        actions, log_probs = self.actor.sample_normal(state, reparameterize=False)
+        actions, log_probs = self.actor.sample_normal(state)
         log_probs = log_probs.view(-1)
         q1_new_policy = self.critic_1.forward(state, actions)
         q2_new_policy = self.critic_2.forward(state, actions)
@@ -268,7 +274,7 @@ class Agent():
         value_loss.backward(retain_graph=True)
         self.value.optimizer.step()
 
-        actions, log_probs = self.actor.sample_normal(state, reparameterize=True)
+        actions, log_probs = self.actor.sample_normal(state)
         log_probs = log_probs.view(-1)
         q1_new_policy = self.critic_1.forward(state, actions)
         q2_new_policy = self.critic_2.forward(state, actions)
