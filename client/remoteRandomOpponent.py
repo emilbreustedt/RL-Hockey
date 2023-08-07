@@ -19,10 +19,10 @@ if __name__ == '__main__':
     controller = RemoteRandomOpponent(weak=False)
 
     # Play n (None for an infinite amount) games and quit
-    client = Client(username='Q-Tips-test', # Testuser
-                    password='AiShaiL9ch',
+    client = Client(username='user0', # Testuser
+                    password='1234',
                     controller=controller, 
-                    output_path='/tmp/ALRL2020/client/Q-Tips', # rollout buffer with finished games will be saved in here
+                    output_path='/tmp/ALRL2020/client/user0', # rollout buffer with finished games will be saved in here
                     interactive=False,
                     op='start_queuing',
                     num_games=None)

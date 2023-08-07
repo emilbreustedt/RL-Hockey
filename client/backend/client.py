@@ -42,7 +42,7 @@ class ClientOperationState:
 
 class Client:
 
-    __VERSION__ = 'ALRL2023_1.1'
+    __VERSION__ = 'ALRL2023_1.2'
 
     def __init__(self,
                  username : str,
@@ -53,7 +53,7 @@ class Client:
                  op : str = None,
                  num_games : Optional[int] = None,
                  server_addr : str = 'al-hockey.is.tuebingen.mpg.de',
-                 server_port : str = '33000'
+                 server_port : str = '33000',
                 ):
 
         self.state = ClientOperationState.IDLE
@@ -64,6 +64,9 @@ class Client:
         self.username = username
         self.password = password
         self.controller = controller
+        self.agentname = self.controller.identifier
+        if self.agentname is not None and len(self.agentname) > 0:
+            self.username = self.username + ':' + self.agentname
         self.output_path = output_path
 
         if self.interactive:

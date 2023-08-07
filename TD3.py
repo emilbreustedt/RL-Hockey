@@ -198,15 +198,7 @@ class TD3Agent(object):
                 pt2.copy_((1-theta)*pt2 + theta*p2)
         
     def remote_act(self, obs : np.ndarray,) -> np.ndarray:
-        eps = self._eps
-        """
-        Expects an observation as input, returns an action
-        """
-        #action = self.policy1.predict(obs) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
-        #print(self.policy1.predict(observation).shape, np.random.normal(0.0,eps,self._action_n,1).shape)
-        action = self.policy1.predict(observation) + np.random.normal(0.0,eps,self._action_n)
-        action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
-        return action
+        return self.act(obs)
     
     def act(self, observation, eps=None):
         if eps is None:

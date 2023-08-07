@@ -45,7 +45,7 @@ def train_gym(agent1, config):
     if config["agent_type"] == "DDPG":
         train_losses = np.empty((0,2))
     rewards = []
-    start_train = 0
+    start_train = 50
     if config["env_type"] == "walker":
         env = gym.make("BipedalWalker-v3", hardcore=False)
     if config["env_type"] == "pendulum":
@@ -161,7 +161,7 @@ def train_hockey(agent_type, agent1, agent2, config):
             ep_r +=r
             #print(r)
             old_r = r
-            if not config["test"] and i>50:
+            if not config["test"] and i>config["exp_phase"]:
                 eps = config["eps"]
                 loss = player1.train(config["iter_fit"])
                 train_losses = np.concatenate((train_losses, np.asarray(loss)))
