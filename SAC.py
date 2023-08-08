@@ -190,13 +190,12 @@ class ActorNetwork(nn.Module):
 class Agent():
     def __init__(self, lr=0.0005, input_dims=[8],
             env=None, gamma=0.99, n_actions=4, max_size=1000000, tau=0.005,
-            layer1_size=256, layer2_size=256, batch_size=256, reward_scale=2, reward_weigh = False, reward_abs = False):
+            layer1_size=256, layer2_size=256, batch_size=256, reward_scale=2, reward_abs = False):
         self.gamma = gamma
         self.tau = tau
         self.memory = Memory(max_size, input_dims, n_actions)
         self.batch_size = batch_size
         self.n_actions = n_actions
-        self.reward_weigh = reward_weigh
         self.reward_abs = reward_abs
 
 
@@ -222,20 +221,12 @@ class Agent():
 
     # remember transition
     def remember(self, state, action, reward, new_state, done):
-        if self.reward_abs and self.reward_weigh:
-            raise Exception("Please choose only one of reward_weigh (weighing non-zero rewards stronger) or reward_abs (only consider non-zero rewards)")
         if self.reward_abs:
             if abs(reward) > 0:
                 self.memory.store_transition(state, action, reward, new_state, done)
             return
         else:
             self.memory.store_transition(state, action, reward, new_state, done)
-            if self.reward_weigh and abs(reward) > 0:
-                self.memory.store_transition(state, action, reward, new_state, done)
-                self.memory.store_transition(state, action, reward, new_state, done)
-                self.memory.store_transition(state, action, reward, new_state, done)
-                self.memory.store_transition(state, action, reward, new_state, done)
-                self.memory.store_transition(state, action, reward, new_state, done)
                     
     # update networks
     def update_network_parameters(self, tau=None):
