@@ -89,6 +89,7 @@ class TD3Agent(object):
         self._action_n = action_space.shape[0]
         self._config = {
             "eps": 0.1,            # Epsilon: noise strength to add to policy
+            "env_type" : "hockey",
             "discount": 0.95,
             "buffer_size": int(1e5),
             "batch_size": 128,
@@ -102,11 +103,13 @@ class TD3Agent(object):
             "cdq": True,
             "smoothing_std": 0.0005,
             "smoothing_clip": 0.00025,
-            "theta" : 0.005
+            "theta" : 0.005,
+            "ou" : False
         }
         self._config.update(userconfig)
         self._eps = self._config['eps']
-
+        if self._config["env_type"] == "hockey":
+            self._action_n = 4
         self.action_noise = OUNoise((self._action_n))
 
         self.buffer = mem.Memory(max_size=self._config["buffer_size"])
@@ -170,8 +173,6 @@ class TD3Agent(object):
 
     def sliding_update(self):
         theta = self._config["theta"]
-        #print("q1 ",next(self.Q1.parameters())[0,0])
-        #print("qt1 before ", next(self.Q_target1.parameters())[0,0])
         # sliding critic target update
         Q2_net = self.Q2.parameters()
         Q_target1 = self.Q_target1.parameters()
@@ -184,7 +185,6 @@ class TD3Agent(object):
                 qt1.copy_((1-theta)*qt1 + theta*q1)
                 qt2.copy_((1-theta)*qt2 + theta*q2)
         
-        #print("qt1 after ", next(self.Q_target1.parameters())[0,0])
         # sliding actor target update
         P2_net = self.policy2.parameters()
         P_target1 = self.policy_target1.parameters()
@@ -203,11 +203,11 @@ class TD3Agent(object):
     def act(self, observation, eps=None):
         if eps is None:
             eps = self._eps
-        #
-        #action = self.policy1.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
-        #print(self.policy1.predict(observation).shape, np.random.normal(0.0,eps,self._action_n,1).shape)
-        action = self.policy1.predict(observation) + np.random.normal(0.0,eps,self._action_n)
-        action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
+        if self._config["ou"]:
+            action = self.policy1.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        else:
+            action = self.policy1.predict(observation) + np.random.normal(0.0,eps,self._action_n)
+        action = self._action_space.low[:self._action_n] + (action + 1.0) / 2.0 * (self._action_space.high[:self._action_n] - self._action_space.low[:self._action_n])
         return action
 
     def policy_smoothing(self, actions):
@@ -237,8 +237,6 @@ class TD3Agent(object):
         cdq = self._config["cdq"]
         self.train_iter+=1
         grads = 0
-        #if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
-        #    self._copy_nets()
         for i in range(iter_fit):
 
             # sample from the replay buffer
@@ -290,17 +288,9 @@ class TD3Agent(object):
                     actor_loss2.backward()
                     self.optimizer2.step()
                     actor_loss2 = actor_loss2.item()
-                #for k in self.policy1.parameters():
-                    #print('===========\ngradient:\n----------\nmin:{}  max{}'.format(torch.min(k.grad),torch.max(k.grad)))
-                    #grads += torch.sum(torch.abs(k.grad))
-                #print(actor_loss1)
                 losses.append((fit_loss1, actor_loss1.item(), fit_loss2, actor_loss2))
             else:
                 losses.append((fit_loss1, None, fit_loss2, None))
-                
-            
-        #if self.train_iter % self._config["update_policy_every"] == 0:
-            #print(grads)
         
         return losses
 

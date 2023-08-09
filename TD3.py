@@ -89,6 +89,7 @@ class TD3Agent(object):
         self._action_n = action_space.shape[0]
         self._config = {
             "eps": 0.1,            # Epsilon: noise strength to add to policy
+            "env_type" : "hockey",
             "discount": 0.95,
             "buffer_size": int(1e5),
             "batch_size": 128,
@@ -102,11 +103,13 @@ class TD3Agent(object):
             "cdq": True,
             "smoothing_std": 0.0005,
             "smoothing_clip": 0.00025,
-            "theta" : 0.005
+            "theta" : 0.005,
+            "ou" : False
         }
         self._config.update(userconfig)
         self._eps = self._config['eps']
-
+        if self._config["env_type"] == "hockey":
+            self._action_n = 4
         self.action_noise = OUNoise((self._action_n))
 
         self.buffer = mem.Memory(max_size=self._config["buffer_size"])
@@ -170,8 +173,6 @@ class TD3Agent(object):
 
     def sliding_update(self):
         theta = self._config["theta"]
-        #print("q1 ",next(self.Q1.parameters())[0,0])
-        #print("qt1 before ", next(self.Q_target1.parameters())[0,0])
         # sliding critic target update
         Q2_net = self.Q2.parameters()
         Q_target1 = self.Q_target1.parameters()
@@ -184,7 +185,6 @@ class TD3Agent(object):
                 qt1.copy_((1-theta)*qt1 + theta*q1)
                 qt2.copy_((1-theta)*qt2 + theta*q2)
         
-        #print("qt1 after ", next(self.Q_target1.parameters())[0,0])
         # sliding actor target update
         P2_net = self.policy2.parameters()
         P_target1 = self.policy_target1.parameters()
@@ -203,11 +203,11 @@ class TD3Agent(object):
     def act(self, observation, eps=None):
         if eps is None:
             eps = self._eps
-        #
-        #action = self.policy1.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
-        #print(self.policy1.predict(observation).shape, np.random.normal(0.0,eps,self._action_n,1).shape)
-        action = self.policy1.predict(observation) + np.random.normal(0.0,eps,self._action_n)
-        action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
+        if self._config["ou"]:
+            action = self.policy1.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        else:
+            action = self.policy1.predict(observation) + np.random.normal(0.0,eps,self._action_n)
+        action = self._action_space.low[:self._action_n] + (action + 1.0) / 2.0 * (self._action_space.high[:self._action_n] - self._action_space.low[:self._action_n])
         return action
 
     def policy_smoothing(self, actions):
@@ -237,8 +237,6 @@ class TD3Agent(object):
         cdq = self._config["cdq"]
         self.train_iter+=1
         grads = 0
-        #if self._config["use_target_net"] and self.train_iter % self._config["update_target_every"] == 0:
-        #    self._copy_nets()
         for i in range(iter_fit):
 
             # sample from the replay buffer
@@ -290,115 +288,10 @@ class TD3Agent(object):
                     actor_loss2.backward()
                     self.optimizer2.step()
                     actor_loss2 = actor_loss2.item()
-                #for k in self.policy1.parameters():
-                    #print('===========\ngradient:\n----------\nmin:{}  max{}'.format(torch.min(k.grad),torch.max(k.grad)))
-                    #grads += torch.sum(torch.abs(k.grad))
-                #print(actor_loss1)
                 losses.append((fit_loss1, actor_loss1.item(), fit_loss2, actor_loss2))
             else:
                 losses.append((fit_loss1, None, fit_loss2, None))
-                
-            
-        #if self.train_iter % self._config["update_policy_every"] == 0:
-            #print(grads)
         
         return losses
 
 
-def main():
-    optParser = optparse.OptionParser()
-    optParser.add_option('-e', '--env',action='store', type='string',
-                         dest='env_name',default="Pendulum-v1",
-                         help='Environment (default %default)')
-    optParser.add_option('-n', '--eps',action='store',  type='float',
-                         dest='eps',default=0.1,
-                         help='Policy noise (default %default)')
-    optParser.add_option('-t', '--train',action='store',  type='int',
-                         dest='train',default=32,
-                         help='number of training batches per episode (default %default)')
-    optParser.add_option('-l', '--lr',action='store',  type='float',
-                         dest='lr',default=0.0001,
-                         help='learning rate for actor/policy (default %default)')
-    optParser.add_option('-m', '--maxepisodes',action='store',  type='float',
-                         dest='max_episodes',default=2000,
-                         help='number of episodes (default %default)')
-    optParser.add_option('-u', '--update',action='store',  type='float',
-                         dest='update_every',default=100,
-                         help='number of episodes between target network updates (default %default)')
-    optParser.add_option('-s', '--seed',action='store',  type='int',
-                         dest='seed',default=None,
-                         help='random seed (default %default)')
-    opts, args = optParser.parse_args()
-    ############## Hyperparameters ##############
-    env_name = opts.env_name
-    # creating environment
-    if env_name == "LunarLander-v2":
-        env = gym.make(env_name, continuous = True)
-    else:
-        env = gym.make(env_name)
-    render = False
-    log_interval = 20           # print avg reward in the interval
-    max_episodes = opts.max_episodes # max training episodes
-    max_timesteps = 2000         # max timesteps in one episode
-
-    train_iter = opts.train      # update networks for given batched after every episode
-    eps = opts.eps               # noise of DDPG policy
-    lr  = opts.lr                # learning rate of DDPG policy
-    random_seed = opts.seed
-    #############################################
-
-
-    if random_seed is not None:
-        torch.manual_seed(random_seed)
-        np.random.seed(random_seed)
-
-    ddpg = DDPGAgent(env.observation_space, env.action_space, eps = eps, learning_rate_actor = lr,
-                     update_target_every = opts.update_every)
-
-    # logging variables
-    rewards = []
-    lengths = []
-    losses = []
-    timestep = 0
-
-    def save_statistics():
-        with open(f"./results/DDPG_{env_name}-eps{eps}-t{train_iter}-l{lr}-s{random_seed}-stat.pkl", 'wb') as f:
-            pickle.dump({"rewards" : rewards, "lengths": lengths, "eps": eps, "train": train_iter,
-                         "lr": lr, "update_every": opts.update_every, "losses": losses}, f)
-
-    # training loop
-    for i_episode in range(1, max_episodes+1):
-        ob, _info = env.reset()
-        ddpg.reset()
-        total_reward=0
-        for t in range(max_timesteps):
-            timestep += 1
-            done = False
-            a = ddpg.act(ob)
-            (ob_new, reward, done, trunc, _info) = env.step(a)
-            total_reward+= reward
-            ddpg.store_transition((ob, a, reward, ob_new, done))
-            ob=ob_new
-            if done or trunc: break
-
-        losses.extend(ddpg.train(train_iter))
-
-        rewards.append(total_reward)
-        lengths.append(t)
-
-        # save every 500 episodes
-        if i_episode % 500 == 0:
-            print("########## Saving a checkpoint... ##########")
-            torch.save(ddpg.state(), f'./results/DDPG_{env_name}_{i_episode}-eps{eps}-t{train_iter}-l{lr}-s{random_seed}.pth')
-            save_statistics()
-
-        # logging
-        if i_episode % log_interval == 0:
-            avg_reward = np.mean(rewards[-log_interval:])
-            avg_length = int(np.mean(lengths[-log_interval:]))
-
-            print('Episode {} \t avg length: {} \t reward: {}'.format(i_episode, avg_length, avg_reward))
-    save_statistics()
-
-if __name__ == '__main__':
-    main()

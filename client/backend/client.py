@@ -217,9 +217,9 @@ escape.
              trunc : Optional[int] = None,
              info : Optional[Dict] = None
             ) -> None:
-
         action = self.controller.remote_act(np.asarray(ob)).tolist()
 
+        #print(r)
         try:
             self.current_game.add_transition(next_obs=ob,
                                             next_action=action,

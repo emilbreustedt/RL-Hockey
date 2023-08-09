@@ -6,7 +6,20 @@ import laserhockey.hockey_env as h_env
 import torch
 
 from TD3 import TD3Agent
-        
+
+class RemoteRandomOpponent(RemoteControllerInterface):
+
+    def __init__(self):
+        RemoteControllerInterface.__init__(self, identifier='Q-Tips_TD3')
+
+    def remote_act(self, 
+            obs : np.ndarray,
+           ) -> np.ndarray:
+        act = np.random.uniform(-1,1,4)
+        print(act, type(act))
+        return act
+
+
 class RemoteTD3(TD3Agent, RemoteControllerInterface):
     def __init__(self):
         config = {
@@ -37,7 +50,7 @@ class RemoteTD3(TD3Agent, RemoteControllerInterface):
             "exp_decay" : 1,
             "cdq" : True
         }
-        name = "weak 4th"
+        name = "fixactionscompare_more"
         mode = "weak"
         config["checkpoint1"] = f'./results/{config["agent_type"]}_hockey_{name}_{mode}_agent.pth'
         env = h_env.HockeyEnv()
@@ -56,10 +69,12 @@ class RemoteTD3(TD3Agent, RemoteControllerInterface):
     def remote_act(self, 
             obs : np.ndarray,
            ) -> np.ndarray:
-        return self.act(obs)
+        act = self.act(obs).astype(np.float64)[:4]
+        return act[:4]
                
 if __name__ == '__main__':
     controller = RemoteTD3()
+    #controller = RemoteRandomOpponent()
     # Play n (None for an infinite amount) games and quit
     client = Client(username='Q-Tips', # Testuser
                     password='AiShaiL9ch',
@@ -67,4 +82,4 @@ if __name__ == '__main__':
                     output_path='/remote_games', # rollout buffer with finished games will be saved in here
                     interactive=False,
                     op='start_queuing',
-                    num_games=None)
+                    num_games=1)

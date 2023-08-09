@@ -89,6 +89,7 @@ class DDPGAgent(object):
         self._action_n = action_space.shape[0]
         self._config = {
             "eps": 0.1,            # Epsilon: noise strength to add to policy
+            "env_type" : "hockey",
             "discount": 0.95,
             "buffer_size": int(1e6),
             "batch_size": 128,
@@ -98,10 +99,13 @@ class DDPGAgent(object):
             "hidden_sizes_critic": [128,128,64],
             "update_target_every": 100,
             "use_target_net": True,
-            "theta" : 0.005
+            "theta" : 0.005,
+            "ou" : False
         }
         self._config.update(userconfig)
         self._eps = self._config['eps']
+        if self._config["env_type"] == "hockey":
+            self._action_n = 4
 
         self.action_noise = OUNoise((self._action_n))
 
@@ -144,9 +148,11 @@ class DDPGAgent(object):
         if eps is None:
             eps = self._eps
         #
-        #action = self.policy.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
-        action = self.policy.predict(observation) + np.random.normal(0.0,eps,self._action_n)
-        action = self._action_space.low + (action + 1.0) / 2.0 * (self._action_space.high - self._action_space.low)
+        if self._config["ou"]:
+            action = self.policy.predict(observation) + eps*self.action_noise()  # action in -1 to 1 (+ noise)
+        else:
+            action = self.policy.predict(observation) + np.random.normal(0.0,eps,self._action_n)
+        action = self._action_space.low[:self._action_n] + (action + 1.0) / 2.0 * (self._action_space.high[:self._action_n] - self._action_space.low[:self._action_n])
         return action
 
     def store_transition(self, transition):
