@@ -119,8 +119,9 @@ def train_hockey(agent_type, agent1, agent2, config):
     rewards = []
     wins, losses, draws, rewards = 0, 0, 0, []
     eps = config["eps"]
-    if not config["retrain"]:
-        eps = 1.0 # entirely random actions for initial 
+    eps = 1.0
+    if config["retrain"]:
+        eps = 0.0 # entirely random actions for initial 
     desc = "Training..."
     if config["test"]:
         desc="Testing..."

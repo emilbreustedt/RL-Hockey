@@ -50,7 +50,7 @@ class RemoteTD3(TD3Agent, RemoteControllerInterface):
             "exp_decay" : 1,
             "cdq" : True
         }
-        name = "fixactionscompare_more"
+        name = "fixedactionscompare_retrain_lowlr_noeps5"
         mode = "weak"
         config["checkpoint1"] = f'./results/{config["agent_type"]}_hockey_{name}_{mode}_agent.pth'
         env = h_env.HockeyEnv()
@@ -82,4 +82,4 @@ if __name__ == '__main__':
                     output_path='/remote_games', # rollout buffer with finished games will be saved in here
                     interactive=False,
                     op='start_queuing',
-                    num_games=1)
+                    num_games=None)
