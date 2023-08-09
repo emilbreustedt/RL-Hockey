@@ -1,6 +1,7 @@
 import numpy as np
 import argparse
 from typing import Dict, List, Optional
+from numbers import Number
 
 import laserhockey
 
@@ -42,7 +43,7 @@ class ClientOperationState:
 
 class Client:
 
-    __VERSION__ = 'ALRL2023_1.2'
+    __VERSION__ = 'ALRL2023_1.5'
 
     def __init__(self,
                  username : str,
@@ -210,16 +211,28 @@ escape.
 
         self.network_interface.send_action(action)
 
+    @staticmethod  # This is a hack for the moment. Needs to be handled more generically
+    def validate_action(action):
+        is_valid = True
+        if not isinstance(action, list):
+            is_valid = False
+        if not len(action) == 4:
+            is_valid = False
+        if not all([isinstance(x, Number) for x in action]):
+            is_valid = False
+        return is_valid
+
     def step(self,
              ob : List[float],
-             r : Optional[int] = None,
+             r : Optional[float] = None,
              done : Optional[int] = None,
              trunc : Optional[int] = None,
              info : Optional[Dict] = None
             ) -> None:
-        action = self.controller.remote_act(np.asarray(ob)).tolist()
 
-        #print(r)
+        action = self.controller.remote_act(np.asarray(ob)).tolist()
+        if self.verbose and done:
+            print(f"Winner: {info['winner']}")
         try:
             self.current_game.add_transition(next_obs=ob,
                                             next_action=action,
@@ -228,10 +241,12 @@ escape.
                                             trunc=trunc,
                                             info=info
                                             )
-
-            self.network_interface.send_action(action)
+            if self.validate_action(action):
+                self.network_interface.send_action(action)
+            else:
+                raise ValueError("Not valid action: " + str(action))
         except:
-            # Game is None, probably due to apportion.
+            # Game is None, probably due to abortion.
             # Just skipping this async call of step
             pass
 
@@ -252,16 +267,16 @@ escape.
 
     def game_done(self,
                   ob : List[float],
-                  r : int,
+                  r : float,
                   done : int,
                   trunc : int,
                   info : Dict,
-                  result : str
+                  result : Dict
                  ) -> None:
 
         if self.verbose:
-            print(f'{result["games_played"]} games played. You won {result["games_won"]} games. You lost {result["games_lost"]} games. {result["games_drawn"]} game(s) end in a draw.')
-
+                print(f"Winner: {info['winner']}")
+                print(f'{result["games_played"]} games played. You won {result["games_won"]} games. You lost {result["games_lost"]} games. {result["games_drawn"]} game(s) end in a draw.')
         self.current_game.add_transition(next_obs=ob,
                                          next_action=None,
                                          r=r,

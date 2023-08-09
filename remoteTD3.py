@@ -79,7 +79,7 @@ if __name__ == '__main__':
     client = Client(username='Q-Tips', # Testuser
                     password='AiShaiL9ch',
                     controller=controller, 
-                    output_path='/remote_games', # rollout buffer with finished games will be saved in here
+                    output_path='C:\Users\Emil\Desktop\RL-Hockey\remote_games', # rollout buffer with finished games will be saved in here
                     interactive=False,
                     op='start_queuing',
                     num_games=1)
