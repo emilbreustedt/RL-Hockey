@@ -50,7 +50,7 @@ class RemoteTD3(TD3Agent, RemoteControllerInterface):
             "exp_decay" : 1,
             "cdq" : True
         }
-        name = "fixactionscompare_more"
+        name = "fixedactionscompare_more"
         mode = "weak"
         config["checkpoint1"] = f'./results/{config["agent_type"]}_hockey_{name}_{mode}_agent.pth'
         env = h_env.HockeyEnv()
@@ -79,7 +79,7 @@ if __name__ == '__main__':
     client = Client(username='Q-Tips', # Testuser
                     password='AiShaiL9ch',
                     controller=controller, 
-                    output_path='C:\Users\Emil\Desktop\RL-Hockey\remote_games', # rollout buffer with finished games will be saved in here
+                    output_path='/Users/emilbreustedt/Documents/GitHub/RL-Hockey/remote_games', # rollout buffer with finished games will be saved in here
                     interactive=False,
                     op='start_queuing',
-                    num_games=1)
+                    num_games=None)
