@@ -1,3 +1,5 @@
+# This file contains the memory and networks for the SAC model
+
 # Imports
 import numpy as np
 import os
